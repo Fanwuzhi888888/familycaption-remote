@@ -234,7 +234,10 @@ function updateStatus() {
 function loadMqtt() {
   if (window.mqtt && typeof window.mqtt.connect === "function") return Promise.resolve(window.mqtt);
   if (mqttLoading) return mqttLoading;
-  const urls = ["https://unpkg.com/mqtt@4/dist/mqtt.min.js", "https://cdn.jsdelivr.net/npm/mqtt@4/dist/mqtt.min.js"];
+  // 同源优先（GitHub Pages 内置库，代理/防火墙下最稳），CDN 仅作兜底
+  const urls = ["./mqtt.min.js",
+                "https://unpkg.com/mqtt@4/dist/mqtt.min.js",
+                "https://cdn.jsdelivr.net/npm/mqtt@4/dist/mqtt.min.js"];
   mqttLoading = new Promise((resolve, reject) => {
     function attempt(index) {
       if (index === urls.length) { reject(new Error("连接库加载失败")); return; }
