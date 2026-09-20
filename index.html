@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>家庭对话记录 · 远程</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0b0e11; color: #e8eaed; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; }
+  [hidden] { display: none !important; }
+  #topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 6; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(11,14,17,.94); border-bottom: 1px solid #23272b; }
+  #title { font-weight: 700; font-size: 16px; margin-right: 4px; white-space: nowrap; }
+  .pill { display: flex; align-items: center; gap: 7px; font: 500 13px sans-serif; color: #bbb; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); padding: 5px 12px; border-radius: 999px; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #E57373; flex: none; }
+  .dot.connected { background: #66BB6A; box-shadow: 0 0 7px #66BB6A; }
+  .dot.connecting { background: #FFD54F; }
+  #spacer { flex: 1; }
+  button { cursor: pointer; font-family: inherit; }
+  button.tab { font: 600 14px sans-serif; color: #9aa0a6; background: none; border: 1px solid transparent; border-radius: 8px; padding: 6px 14px; }
+  button.tab.active { color: #fff; background: rgba(79,195,247,.14); border-color: rgba(79,195,247,.55); }
+  #settings { font: 500 14px sans-serif; color: #bbb; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 6px 14px; }
+  #banner { position: fixed; top: 54px; left: 12px; right: 12px; z-index: 5; text-align: center; color: #FFD54F; font-size: clamp(14px, 1.6vw, 18px); font-weight: 500; }
+  main { position: fixed; top: 54px; bottom: 0; left: 0; right: 0; overflow-y: auto; padding: 12px 4vw 40px; }
+  main > .inner { max-width: 860px; margin: 0 auto; }
+  /* ── 纪要列表 ── */
+  #sum-tools { display: flex; align-items: center; gap: 10px; margin: 4px 0 12px; color: #9aa0a6; font-size: 13px; }
+  #clear-sums { font-size: 13px; color: #e57373; background: none; border: 1px solid rgba(229,115,115,.4); border-radius: 8px; padding: 5px 12px; }
+  .sum { background: #14181c; border: 1px solid #262b30; border-radius: 14px; padding: 16px 18px; margin: 0 0 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+  .sum.new { animation: pop .5s ease; }
+  @keyframes pop { from { transform: scale(.98); opacity: 0; } }
+  .sum header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; margin-bottom: 8px; }
+  .sum .range { font-weight: 700; font-size: 17px; color: #4FC3F7; }
+  .sum .date { font-size: 13px; color: #9aa0a6; }
+  .sum .meta { font-size: 12.5px; color: #79828b; margin-left: auto; }
+  .sum .sumtext { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15.5px; line-height: 1.75; color: #dfe3e7; }
+  #sum-empty { text-align: center; color: #666; font-size: 15px; padding: 60px 20px; line-height: 1.9; }
+  /* ── 实时转写流 ── */
+  #live-tip { color: #666; font-size: 13px; text-align: center; padding: 14px 0 6px; }
+  .tline { display: flex; gap: 10px; padding: 7px 4px; border-bottom: 1px dashed #1d2126; font-size: 15px; line-height: 1.6; align-items: baseline; }
+  .tline .t { flex: none; color: #5f6b76; font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .tline .name { flex: none; max-width: 34%; font-size: 12.5px; padding: 2px 8px; border-radius: 6px; color: #000; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tline .text { overflow-wrap: anywhere; }
+  .tline.live .text { color: #9aa0a6; }
+  .tline.state { color: #FFD54F; font-size: 13px; justify-content: center; border-bottom: none; }
+  #config { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.85); overflow: auto; padding: 20px 16px; display: flex; }
+  form { width: 440px; max-width: 100%; margin: auto; background: #14181c; border: 1px solid #333; border-radius: 16px; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  form p { font-size: 14px; line-height: 1.6; color: #aaa; margin: 0 0 18px; }
+  label { display: block; font-size: 15px; margin: 14px 0 6px; }
+  input { width: 100%; min-width: 0; font: 16px sans-serif; color: #fff; background: #080808; border: 1px solid #555; border-radius: 8px; padding: 11px; }
+  input:focus, button:focus-visible { outline: 2px solid #4FC3F7; outline-offset: 2px; }
+  .actions { display: flex; gap: 10px; margin-top: 20px; }
+  .actions button { flex: 1; font: 700 16px sans-serif; border: 1px solid #555; border-radius: 8px; background: #222; color: #ddd; padding: 12px; }
+  #connect { background: #4FC3F7; color: #000; border-color: #4FC3F7; }
+  #config-error { color: #FFD54F; margin-top: 12px; margin-bottom: 0; }
+  @media (max-width: 560px) { #title { display: none; } main { padding: 12px 3vw 40px; } }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <span id="title">家庭对话记录</span>
+  <span class="pill" role="status"><span id="status-dot" class="dot"></span><span id="status-text">已断开</span></span>
+  <button class="tab active" id="tab-sum" type="button">会议纪要</button>
+  <button class="tab" id="tab-live" type="button">实时转写</button>
+  <span id="spacer"></span>
+  <button id="settings" type="button">设置</button>
+</div>
+<div id="banner" role="status" hidden></div>
+<main id="view-sum" aria-label="会议纪要">
+  <div class="inner">
+    <div id="sum-tools"><span id="sum-count"></span><span style="flex:1"></span><button id="clear-sums" type="button">清空存档</button></div>
+    <div id="sum-list"></div>
+    <div id="sum-empty">暂无会议纪要。<br>设备端每 5 分钟把这段时间的对话整理成纪要并推送到这里；<br>对麦克风说话并等待窗口到期即可看到第一条纪要。</div>
+  </div>
+</main>
+<main id="view-live" aria-label="实时转写" hidden>
+  <div class="inner">
+    <div id="live-tip">仅显示已说完的整句（final），按到达时间排列</div>
+    <div id="transcript" aria-live="polite"></div>
+  </div>
+</main>
+<section id="config" aria-label="连接配置">
+  <form id="config-form">
+    <h1>家庭对话记录 · 远程</h1>
+    <p>填入现场的连接信息。主题令牌等同门锁钥匙，勿外传。配置只保存在此浏览器；纪要存档也保存在此浏览器。</p>
+    <label for="broker">WSS 地址</label><input id="broker" name="broker" type="url" required placeholder="wss://broker-cn.emqx.io:8084/mqtt" autocomplete="off" spellcheck="false">
+    <label for="token">主题令牌</label><input id="token" name="token" required placeholder="与现场一致的随机串" autocomplete="off" spellcheck="false">
+    <label for="username">用户名（公共 broker 可留空）</label><input id="username" name="username" autocomplete="off" spellcheck="false">
+    <label for="password">密码（公共 broker 可留空）</label><input id="password" name="password" type="password" autocomplete="off">
+    <p id="config-error" role="alert" hidden></p>
+    <div class="actions"><button id="cancel" type="button" hidden>返回</button><button id="connect" type="submit">连接</button></div>
+  </form>
+</section>
+<script>
+"use strict";
+// 单文件页面；订阅 caption/status/summary，发布 viewer ping（M6 防线2）。
+// 所有远端文字均通过 textContent 写入。纪要存档 localStorage 持久化，按 id 去重。
+const fields = ["broker", "token", "username", "password"];
+const el = id => document.getElementById(id);
+let client = null;
+let generation = 0;
+let transport = "disconnected";
+let sourceState = "";
+let activeConfig = null;
+let mqttLoading = null;
+let libraryFailed = false;
+let subscribeRetry = null;
+let pingTimer = null;          // M6 防线2：viewer 周期 ping
+let liveRow = null;            // partial 打字机行
+let stickBottom = true;        // 转写流自动滚底
+const SUM_KEY = "fc_remote_summaries_v1";
+const MAX_SUMS = 200;
+const MAX_TLINES = 500;
+
+// ── 纪要存档 ──────────────────────────────────────────────
+function loadSums() {
+  try {
+    const v = JSON.parse(localStorage.getItem(SUM_KEY) || "[]");
+    return Array.isArray(v) ? v.filter(s => s && typeof s.id === "string" && typeof s.text === "string") : [];
+  } catch (_) { return []; }
+}
+function saveSums(list) {
+  try { localStorage.setItem(SUM_KEY, JSON.stringify(list.slice(0, MAX_SUMS))); }
+  catch (_) { /* 隐私模式：仅本次会话可见 */ }
+}
+function fmtRange(s) {
+  const st = /^\d{1,2}:\d{2}$/.test(s && s.start) ? s.start : "--:--";
+  const en = /^\d{1,2}:\d{2}$/.test(s && s.end) ? s.end : "--:--";
+  return `${st} ~ ${en}`;
+}
+function fmtDate(ts) {
+  const d = new Date(ts || Date.now());
+  const p = n => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())} 收到`;
+}
+function makeSumCard(s, isNew) {
+  const card = document.createElement("article");
+  card.className = "sum" + (isNew ? " new" : "");
+  const head = document.createElement("header");
+  const range = document.createElement("span"); range.className = "range"; range.textContent = fmtRange(s);
+  const date = document.createElement("span"); date.className = "date"; date.textContent = fmtDate(s.ts);
+  const meta = document.createElement("span"); meta.className = "meta";
+  meta.textContent = `${Number(s.turns) || 0} 句 · ${Number(s.chars) || 0} 字`;
+  head.append(range, date, meta);
+  const body = document.createElement("div"); body.className = "sumtext"; body.textContent = s.text;
+  card.append(head, body);
+  return card;
+}
+function renderSums() {
+  const list = loadSums().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const wrap = el("sum-list");
+  wrap.textContent = "";
+  list.forEach(s => wrap.append(makeSumCard(s, false)));
+  el("sum-empty").hidden = list.length > 0;
+  el("sum-count").textContent = list.length ? `共 ${list.length} 条存档` : "";
+}
+function onSummary(s) {
+  if (!s || typeof s.id !== "string" || !s.id || typeof s.text !== "string" || !s.text) return;
+  const list = loadSums();
+  if (list.some(x => x.id === s.id)) return;   // QoS1 重复消息按 id 去重
+  list.push({ id: s.id, start: s.start, end: s.end, text: s.text,
+              turns: s.turns, chars: s.chars, ts: Date.now() });
+  saveSums(list);
+  el("sum-list").prepend(makeSumCard(list[list.length - 1], true));
+  el("sum-empty").hidden = true;
+  el("sum-count").textContent = `共 ${list.length} 条存档`;
+}
+el("clear-sums").addEventListener("click", () => {
+  if (confirm("确定清空本浏览器里的全部纪要存档？")) { saveSums([]); renderSums(); }
+});
+
+// ── 实时转写流 ────────────────────────────────────────────
+function fmtClock(d) {
+  const p = n => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function makeTline(name, color, text, cls) {
+  const row = document.createElement("div");
+  row.className = "tline" + (cls ? " " + cls : "");
+  const t = document.createElement("span"); t.className = "t"; t.textContent = fmtClock(new Date());
+  const tag = document.createElement("span"); tag.className = "name";
+  tag.textContent = typeof name === "string" && name ? name : "家人";
+  tag.style.backgroundColor = /^#[0-9a-f]{6}$/i.test(color) ? color : "#4FC3F7";
+  const tx = document.createElement("span"); tx.className = "text"; tx.textContent = text;
+  row.append(t, tag, tx);
+  return row;
+}
+function feedAppend(row) {
+  const box = el("transcript");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  box.append(row);
+  while (box.childElementCount > MAX_TLINES) box.firstElementChild.remove();
+  if (stickBottom || atBottom) box.parentElement.scrollTop = box.parentElement.scrollHeight;
+}
+el("view-live").addEventListener("scroll", () => {
+  stickBottom = el("view-live").scrollHeight - el("view-live").scrollTop - el("view-live").clientHeight < 80;
+});
+function onCaptionEvent(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return;
+  if (event.type === "status") {
+    if (["listening", "reconnecting", "stopped"].includes(event.state)) {
+      sourceState = event.state;
+      if (liveRow) { liveRow.remove(); liveRow = null; }
+      feedAppend(makeTline("", "", event.state === "stopped" ? "—— 现场服务已停止 ——" : "—— 现场语音识别重连中 ——", "state"));
+      updateStatus();
+    }
+    return;
+  }
+  if (typeof event.text !== "string") return;
+  if (event.type === "partial") {
+    if (liveRow) liveRow.remove();
+    liveRow = event.text ? makeTline(event.name, event.color, event.text, "live") : null;
+    if (liveRow) feedAppend(liveRow);
+  } else if (event.type === "final") {
+    if (!event.text) return;
+    if (liveRow) { liveRow.remove(); liveRow = null; }
+    feedAppend(makeTline(event.name, event.color, event.text, ""));
+  } else if (event.type === "summary") {
+    onSummary(event);
+  }
+}
+
+// ── 状态与连接 ────────────────────────────────────────────
+function updateStatus() {
+  el("status-dot").className = "dot " + transport;
+  el("status-text").textContent = { connected: "已连接", connecting: "连接中", disconnected: "已断开" }[transport];
+  const message = libraryFailed ? "连接库加载失败，请检查网络后在设置中重试" :
+    transport !== "connected" && activeConfig ? "连接中断 · 自动重连中…" :
+    sourceState === "stopped" ? "现场服务已停止" :
+    sourceState === "reconnecting" ? "现场语音识别重连中…" : "";
+  el("banner").textContent = message;
+  el("banner").hidden = !message;
+}
+function loadMqtt() {
+  if (window.mqtt && typeof window.mqtt.connect === "function") return Promise.resolve(window.mqtt);
+  if (mqttLoading) return mqttLoading;
+  const urls = ["https://unpkg.com/mqtt@4/dist/mqtt.min.js", "https://cdn.jsdelivr.net/npm/mqtt@4/dist/mqtt.min.js"];
+  mqttLoading = new Promise((resolve, reject) => {
+    function attempt(index) {
+      if (index === urls.length) { reject(new Error("连接库加载失败")); return; }
+      const script = document.createElement("script");
+      script.src = urls[index]; script.async = true;
+      let done = false;
+      const timer = setTimeout(() => finish(false), 12000);
+      function finish(ok) {
+        if (done) return; done = true; clearTimeout(timer);
+        script.onload = script.onerror = null;
+        if (ok && window.mqtt && typeof window.mqtt.connect === "function") resolve(window.mqtt);
+        else { script.remove(); attempt(index + 1); }
+      }
+      script.onload = () => finish(true); script.onerror = () => finish(false);
+      document.head.append(script);
+    }
+    attempt(0);
+  }).catch(error => { mqttLoading = null; throw error; });
+  return mqttLoading;
+}
+function validate(config) {
+  let address;
+  try { address = new URL(config.broker); } catch (_) { return "请输入完整的 WSS 地址。"; }
+  if (address.protocol !== "wss:" || !address.hostname || address.username || address.password || address.hash)
+    return "地址必须以 wss:// 开头；用户名和密码请填写在各自输入框。";
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(config.token)) return "令牌只能包含字母、数字、下划线或连字符，不能包含空格或 / + #。";
+  return "";
+}
+async function connect(config) {
+  const run = ++generation;
+  clearTimeout(subscribeRetry);
+  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+  if (client) { const old = client; client = null; old.end(true); }
+  activeConfig = config; sourceState = ""; libraryFailed = false;
+  transport = "connecting"; updateStatus();
+  el("transcript").textContent = "";
+  try {
+    const mqtt = await loadMqtt();
+    if (run !== generation) return;
+    const base = `familycaption/${config.token}`;
+    const topics = {
+      caption: `${base}/caption`, status: `${base}/status`,
+      summary: `${base}/summary`, viewer: `${base}/viewer`
+    };
+    const connection = mqtt.connect(config.broker, {
+      username: config.username || undefined, password: config.password || undefined,
+      clean: true, reconnectPeriod: 3000, connectTimeout: 10000, keepalive: 30, resubscribe: false
+    });
+    client = connection;
+    const current = () => run === generation && connection === client;
+    const disconnected = () => { if (current()) { transport = "disconnected"; updateStatus(); } };
+    connection.on("connect", () => {
+      if (!current()) return;
+      // summary 用 QoS1 订阅（设备端 QoS1 发布）；重复消息按 id 去重
+      connection.subscribe([[topics.caption, 0], [topics.status, 0], [topics.summary, 1], [topics.viewer, 0]],
+        (error, granted) => {
+          if (!current()) return;
+          if (error || !granted || granted.length !== 4 || granted.some(item => item.qos === 128)) {
+            disconnected();
+            clearTimeout(subscribeRetry);
+            subscribeRetry = setTimeout(() => { if (current()) connection.reconnect(); }, 3000);
+            return;
+          }
+          transport = "connected"; updateStatus();
+          // M6 防线2：在线即周期 ping 现场设备（60s），设备据此判定有远程查看端
+          if (pingTimer) clearInterval(pingTimer);
+          pingTimer = setInterval(() => {
+            if (current() && transport === "connected") connection.publish(topics.viewer, "ping", { qos: 0 });
+          }, 60000);
+          connection.publish(topics.viewer, "ping", { qos: 0 });   // 首次立即 ping
+        });
+    });
+    connection.on("reconnect", () => { if (current()) { transport = "connecting"; updateStatus(); } });
+    connection.on("offline", disconnected);
+    connection.on("close", disconnected);
+    connection.on("error", disconnected);
+    connection.on("message", (topic, payload) => {
+      if (!current() || payload.length > 65536) return;
+      try {
+        const event = JSON.parse(payload.toString());
+        if (topic === topics.summary) onSummary(event);
+        else if (topic === topics.status) {
+          if (event && typeof event === "object") onCaptionEvent({ type: "status", state: event.state });
+        } else if (topic === topics.caption) onCaptionEvent(event);
+      } catch (_) { /* 丢弃损坏或非 JSON 消息，不影响后续事件。 */ }
+    });
+  } catch (_) {
+    if (run !== generation) return;
+    transport = "disconnected"; libraryFailed = !(window.mqtt && window.mqtt.connect); updateStatus();
+  }
+}
+
+// ── 页面交互 ──────────────────────────────────────────────
+function switchTab(sum) {
+  el("tab-sum").classList.toggle("active", sum);
+  el("tab-live").classList.toggle("active", !sum);
+  el("view-sum").hidden = !sum;
+  el("view-live").hidden = sum;
+}
+el("tab-sum").addEventListener("click", () => switchTab(true));
+el("tab-live").addEventListener("click", () => switchTab(false));
+function showConfig() {
+  el("config").hidden = false; el("cancel").hidden = !activeConfig; el("broker").focus();
+}
+el("settings").addEventListener("click", showConfig);
+el("cancel").addEventListener("click", () => { el("config").hidden = true; });
+el("config-form").addEventListener("submit", event => {
+  event.preventDefault();
+  const config = Object.fromEntries(fields.map(key => [key, el(key).value.trim()]));
+  const error = validate(config);
+  el("config-error").textContent = error; el("config-error").hidden = !error;
+  if (error) return;
+  try { fields.forEach(key => localStorage.setItem("fc_remote_" + key, config[key])); } catch (_) {}
+  el("config").hidden = true; connect(config);
+});
+renderSums();
+try {
+  const saved = Object.fromEntries(fields.map(key => [key, localStorage.getItem("fc_remote_" + key) || ""]));
+  if (!saved.broker) saved.broker = "wss://broker-cn.emqx.io:8084/mqtt";
+  fields.forEach(key => { el(key).value = saved[key]; });
+  if (!validate(saved)) { el("config").hidden = true; connect(saved); }
+} catch (_) { /* file:// 或隐私模式禁用存储时仍允许手动填写。 */ }
+</script>
+</body>
+</html>
