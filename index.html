@@ -291,29 +291,33 @@ async function connect(config) {
     const disconnected = () => { if (current()) { transport = "disconnected"; updateStatus(); } };
     connection.on("connect", () => {
       if (!current()) return;
-      // summary 用 QoS1 订阅（设备端 QoS1 发布）；重复消息按 id 去重。
-      // 注意：{topic: qos} 对象形式——数组套数组形式在此 mqtt.js 版本会抛
-      // validateTopics 异常（e.split is not a function），导致连接循环重置
-      connection.subscribe({
-        [topics.caption]: 0, [topics.status]: 0,
-        [topics.summary]: 1, [topics.viewer]: 0,
-      },
-        (error, granted) => {
-          if (!current()) return;
-          if (error || !granted || granted.length !== 4 || granted.some(item => item.qos === 128)) {
-            disconnected();
-            clearTimeout(subscribeRetry);
-            subscribeRetry = setTimeout(() => { if (current()) connection.reconnect(); }, 3000);
-            return;
-          }
-          transport = "connected"; updateStatus();
-          // M6 防线2：在线即周期 ping 现场设备（60s），设备据此判定有远程查看端
-          if (pingTimer) clearInterval(pingTimer);
-          pingTimer = setInterval(() => {
-            if (current() && transport === "connected") connection.publish(topics.viewer, "ping", { qos: 0 });
-          }, 60000);
-          connection.publish(topics.viewer, "ping", { qos: 0 });   // 首次立即 ping
-        });
+      // 订阅必须用字符串数组形式：此 mqtt.js 构建的对象形式 {topic:qos} 回调
+      // 永不触发（实测），数组套数组形式直接抛 validateTopics 异常。
+      // summary 单独一组用 QoS1（设备端 QoS1 发布）；重复消息按 id 去重
+      let subDone = 0;
+      const subFail = () => {
+        disconnected();
+        clearTimeout(subscribeRetry);
+        subscribeRetry = setTimeout(() => { if (current()) connection.reconnect(); }, 3000);
+      };
+      const subAck = (error, granted) => {
+        if (!current()) return;
+        if (error || !granted || !granted.length || granted.some(item => item.qos === 128)) {
+          subFail();
+          return;
+        }
+        subDone++;
+        if (subDone < 2) return;
+        transport = "connected"; updateStatus();
+        // M6 防线2：在线即周期 ping 现场设备（60s），设备据此判定有远程查看端
+        if (pingTimer) clearInterval(pingTimer);
+        pingTimer = setInterval(() => {
+          if (current() && transport === "connected") connection.publish(topics.viewer, "ping", { qos: 0 });
+        }, 60000);
+        connection.publish(topics.viewer, "ping", { qos: 0 });   // 首次立即 ping
+      };
+      connection.subscribe([topics.caption, topics.status, topics.viewer], { qos: 0 }, subAck);
+      connection.subscribe([topics.summary], { qos: 1 }, subAck);
     });
     connection.on("reconnect", () => { if (current()) { transport = "connecting"; updateStatus(); } });
     connection.on("offline", disconnected);
