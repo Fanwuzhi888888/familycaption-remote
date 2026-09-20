@@ -66,7 +66,7 @@
   <button class="tab active" id="tab-sum" type="button">会议纪要</button>
   <button class="tab" id="tab-live" type="button">实时转写</button>
   <span id="spacer"></span>
-  <button id="glm-toggle" type="button" disabled>暂停纪要</button>
+  <button id="glm-toggle" type="button" disabled>暂停服务</button>
   <button id="settings" type="button">设置</button>
 </div>
 <div id="banner" role="status" hidden></div>
@@ -181,11 +181,11 @@ const GLM_KEY = "fc_remote_glm";
 let glmEnabled = (() => { try { return localStorage.getItem(GLM_KEY) !== "0"; } catch (_) { return true; } })();
 function renderGlmBtn() {
   const btn = el("glm-toggle");
-  btn.textContent = glmEnabled ? "暂停纪要" : "恢复纪要";
+  btn.textContent = glmEnabled ? "暂停服务" : "恢复服务";
   btn.classList.toggle("paused", !glmEnabled);
   btn.title = glmEnabled
-    ? "暂停后设备不再调用云端大模型整理纪要（零消耗），实时转写不受影响"
-    : "恢复后设备继续整理会议纪要；暂停前的旧转写会在恢复后补一份";
+    ? "暂停后设备停止语音转写与纪要生成，云端（识别+大模型）零消耗"
+    : "恢复后设备重新连上语音识别，继续生成会议纪要";
 }
 function setGlmEnabled(on, persist) {
   glmEnabled = on;
@@ -258,7 +258,7 @@ function updateStatus() {
   el("status-text").textContent = { connected: "已连接", connecting: "连接中", disconnected: "已断开" }[transport];
   const message = libraryFailed ? "连接库加载失败，请检查网络后在设置中重试" :
     transport !== "connected" && activeConfig ? "连接中断 · 自动重连中…" :
-    sourceState === "stopped" ? "现场服务已停止" :
+    sourceState === "stopped" ? (glmEnabled ? "现场服务已停止" : "现场服务已在网页端暂停（点「恢复服务」继续）") :
     sourceState === "reconnecting" ? "现场语音识别重连中…" : "";
   el("banner").textContent = message;
   el("banner").hidden = !message;
