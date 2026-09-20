@@ -291,8 +291,13 @@ async function connect(config) {
     const disconnected = () => { if (current()) { transport = "disconnected"; updateStatus(); } };
     connection.on("connect", () => {
       if (!current()) return;
-      // summary 用 QoS1 订阅（设备端 QoS1 发布）；重复消息按 id 去重
-      connection.subscribe([[topics.caption, 0], [topics.status, 0], [topics.summary, 1], [topics.viewer, 0]],
+      // summary 用 QoS1 订阅（设备端 QoS1 发布）；重复消息按 id 去重。
+      // 注意：{topic: qos} 对象形式——数组套数组形式在此 mqtt.js 版本会抛
+      // validateTopics 异常（e.split is not a function），导致连接循环重置
+      connection.subscribe({
+        [topics.caption]: 0, [topics.status]: 0,
+        [topics.summary]: 1, [topics.viewer]: 0,
+      },
         (error, granted) => {
           if (!current()) return;
           if (error || !granted || granted.length !== 4 || granted.some(item => item.qos === 128)) {
