@@ -19,6 +19,9 @@
   button.tab { font: 600 14px sans-serif; color: #9aa0a6; background: none; border: 1px solid transparent; border-radius: 8px; padding: 6px 14px; }
   button.tab.active { color: #fff; background: rgba(79,195,247,.14); border-color: rgba(79,195,247,.55); }
   #settings { font: 500 14px sans-serif; color: #bbb; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 6px 14px; }
+  #glm-toggle { font: 600 13px sans-serif; color: #FFD54F; background: rgba(255,213,79,.07); border: 1px solid rgba(255,213,79,.45); border-radius: 999px; padding: 6px 13px; white-space: nowrap; }
+  #glm-toggle.paused { color: #81C784; background: rgba(129,199,132,.07); border-color: rgba(129,199,132,.45); }
+  #glm-toggle:disabled { opacity: .4; cursor: not-allowed; }
   #banner { position: fixed; top: 54px; left: 12px; right: 12px; z-index: 5; text-align: center; color: #FFD54F; font-size: clamp(14px, 1.6vw, 18px); font-weight: 500; }
   main { position: fixed; top: 54px; bottom: 0; left: 0; right: 0; overflow-y: auto; padding: 12px 4vw 40px; }
   main > .inner { max-width: 860px; margin: 0 auto; }
@@ -63,6 +66,7 @@
   <button class="tab active" id="tab-sum" type="button">会议纪要</button>
   <button class="tab" id="tab-live" type="button">实时转写</button>
   <span id="spacer"></span>
+  <button id="glm-toggle" type="button" disabled>暂停纪要</button>
   <button id="settings" type="button">设置</button>
 </div>
 <div id="banner" role="status" hidden></div>
@@ -106,6 +110,7 @@ let mqttLoading = null;
 let libraryFailed = false;
 let subscribeRetry = null;
 let pingTimer = null;          // M6 防线2：viewer 周期 ping
+let viewerTopic = "";          // M8c：下行命令/回执主题
 let liveRow = null;            // partial 打字机行
 let stickBottom = true;        // 转写流自动滚底
 const SUM_KEY = "fc_remote_summaries_v1";
@@ -169,6 +174,32 @@ el("clear-sums").addEventListener("click", () => {
   if (confirm("确定清空本浏览器里的全部纪要存档？")) { saveSums([]); renderSums(); }
 });
 
+// ── 纪要生成开关（M8c）：远程控制设备端是否调用云端大模型 ────
+// 暂停后设备转写照常上云（实时流不受影响），但不再缓冲/请求 GLM——零调用零消耗；
+// 设备端 NVS 持久化（重启保持），本页 localStorage 记忆 + ack/status 回执校准。
+const GLM_KEY = "fc_remote_glm";
+let glmEnabled = (() => { try { return localStorage.getItem(GLM_KEY) !== "0"; } catch (_) { return true; } })();
+function renderGlmBtn() {
+  const btn = el("glm-toggle");
+  btn.textContent = glmEnabled ? "暂停纪要" : "恢复纪要";
+  btn.classList.toggle("paused", !glmEnabled);
+  btn.title = glmEnabled
+    ? "暂停后设备不再调用云端大模型整理纪要（零消耗），实时转写不受影响"
+    : "恢复后设备继续整理会议纪要；暂停前的旧转写会在恢复后补一份";
+}
+function setGlmEnabled(on, persist) {
+  glmEnabled = on;
+  if (persist) { try { localStorage.setItem(GLM_KEY, on ? "1" : "0"); } catch (_) {} }
+  renderGlmBtn();
+}
+el("glm-toggle").addEventListener("click", () => {
+  if (!client || transport !== "connected" || !viewerTopic) return;
+  const cmd = glmEnabled ? "glm_stop" : "glm_resume";
+  client.publish(viewerTopic, JSON.stringify({ cmd }), { qos: 0 });
+  setGlmEnabled(!glmEnabled, true);   // 乐观更新；设备回执/状态会再校准
+});
+renderGlmBtn();
+
 // ── 实时转写流 ────────────────────────────────────────────
 function fmtClock(d) {
   const p = n => String(n).padStart(2, "0");
@@ -223,6 +254,7 @@ function onCaptionEvent(event) {
 // ── 状态与连接 ────────────────────────────────────────────
 function updateStatus() {
   el("status-dot").className = "dot " + transport;
+  el("glm-toggle").disabled = transport !== "connected";
   el("status-text").textContent = { connected: "已连接", connecting: "连接中", disconnected: "已断开" }[transport];
   const message = libraryFailed ? "连接库加载失败，请检查网络后在设置中重试" :
     transport !== "connected" && activeConfig ? "连接中断 · 自动重连中…" :
@@ -282,6 +314,7 @@ async function connect(config) {
       caption: `${base}/caption`, status: `${base}/status`,
       summary: `${base}/summary`, viewer: `${base}/viewer`
     };
+    viewerTopic = topics.viewer;   // M8c：供纪要开关按钮下发命令
     const connection = mqtt.connect(config.broker, {
       username: config.username || undefined, password: config.password || undefined,
       clean: true, reconnectPeriod: 3000, connectTimeout: 10000, keepalive: 30, resubscribe: false
@@ -329,7 +362,15 @@ async function connect(config) {
         const event = JSON.parse(payload.toString());
         if (topic === topics.summary) onSummary(event);
         else if (topic === topics.status) {
-          if (event && typeof event === "object") onCaptionEvent({ type: "status", state: event.state });
+          if (event && typeof event === "object") {
+            onCaptionEvent({ type: "status", state: event.state });
+            if (event.glm === 0 || event.glm === 1) setGlmEnabled(event.glm === 1, true);   // M8c：设备侧开关校准
+          }
+        } else if (topic === topics.viewer) {
+          // M8c：设备命令回执 {"type":"ack","cmd":"glm_stop"|"glm_resume"}（ping 非 JSON 自动忽略）
+          if (event && event.type === "ack" &&
+              (event.cmd === "glm_stop" || event.cmd === "glm_resume"))
+            setGlmEnabled(event.cmd === "glm_resume", true);
         } else if (topic === topics.caption) onCaptionEvent(event);
       } catch (_) { /* 丢弃损坏或非 JSON 消息，不影响后续事件。 */ }
     });
